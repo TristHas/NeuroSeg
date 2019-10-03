@@ -3,6 +3,7 @@ from itertools import product
 import torch
 import numpy as np
 from .preprocess import Warp, Flip, Greyscale, Affinity
+from.superaug import BlurAugment, MisalignAugment, MissingAugment
 from tqdm import tqdm
 
 default_dst = list()
@@ -25,16 +26,12 @@ def make_gaussian(z, y, x, sigma=0.5):
     return np.exp(-(d**2 / (2.0 * sigma**2)))
 
 class DataSet(object):
-    def __init__(self, fov, img, lbl, coords=None, sparse=True,
-                 mode="train", w=True, g=True, f=True, 
+    def __init__(self, fov, img, lbl, mode="train", 
+                 w=True, g=True, f=True, ma=False, mis=False, blr=False, 
                  dst=default_dst, nsamp=None):
-        if coords is not None:
-            for i in range(coords.shape[1]):
-                coords = coords[coords[:,i]>fov[i]//2]
-                coords = coords[coords[:,i]<img.shape[i]-fov[i]//2]
-        self.coords = coords
         self.img = img
         self.lbl = np.ones_like(img) if lbl is None else lbl
+        
         self.fov   = fov
         self.dst   = dst
         self.size  = self.img.shape
@@ -42,13 +39,20 @@ class DataSet(object):
         self._w = w
         self._f = f
         self._g = g
+        self._ma = ma
+        self._mis = mis
+        self._blr = blr
         self.mode = mode
         self.nsamp = nsamp if nsamp else int(10**10)
         
         self.w = Warp()
         self.f = Flip()
         self.g = Greyscale()
-        self.a = Affinity(dst=self.dst, recompute=False, sparse=sparse)
+        self.blr = BlurAugment()
+        self.mis = MissingAugment()
+        self.ma = MisalignAugment()
+        self.a = Affinity(dst=self.dst, recompute=False)
+        
         
     def __getitem__(self, _):
         return self.sample()
@@ -60,50 +64,43 @@ class DataSet(object):
         img, lbl = self._sample()
         img, lbl = self.aug(img, lbl)
         aff, msk = self.a(lbl)
-        #caution!!!
         return img, aff, msk
-        #return img, aff, msk, np.array(lbl,dtype=np.int32)
-        
-    
-    #======= for background computation ===========================
-    def sample_back(self):
-        img, lbl = self._sample()
-        img, lbl = self.aug(img, lbl)
-        aff, msk = self.a(lbl)
-        #return img, lbl.reshape((1,)+lbl.shape), msk
-        return img, lbl.astype("float32"), msk
-    #===============================================================
         
     def aug(self, img, lbl):
         if self.mode=="train":
+            #print("First", img.shape)
+            img, lbl = self.ma.augment(img,lbl) if self._ma else (img[None,:], lbl[None,:])
+            #print("Miss alignement", img.shape)
             img, lbl = self.w(img,lbl) if self._w else (img[None,:], lbl[None,:])
+            #print("Wrap", img.shape)
             img, lbl = self.f(img,lbl) if self._f else (img, lbl)
+            #print("Flip", img.shape)
+            img = self.blr.augment(img) if self._blr else img
+            #print("Blur", img.shape)
             img = self.g(img) if self._g else img
+            #print("Gray", img.shape)
+            img = self.mis.augment(img) if self._mis else img
+            #print("Missing section", img.shape)
+            #print(img.shape)
         else:
             img, lbl = img[None,:], lbl[None,:]
         return img, lbl
         
-    def _sample(self):
-        try:
-            fov_  = self._prepare_aug()
-            delta = (fov_ // 2) 
-            coord = self.gen_coord(delta)
-            return self._slice(coord, delta)
-        except Exception as e:
-            return self._sample()
-        
+    def _sample(self, fov_=None):
+        fov_  = self._prepare_aug() if fov_ is None else fov_
+        delta = (fov_ // 2) 
+        coord = self.gen_coord(delta)
+        return self._slice(coord, delta)
+    
     def gen_coord(self, delta):
-        if self.coords is not None:
-            coord = self.coords[np.random.randint(self.coords.shape[0])]
-        else:
-            mins  = delta
-            maxs  = np.array(self.size) - np.array(delta) - 1
-            coord = *map(lambda x: np.random.randint(*x), zip(mins, maxs)),
+        mins  = delta
+        maxs  = np.array(self.size) - np.array(delta) - 1
+        coord = *map(lambda x: np.random.randint(*x), zip(mins, maxs)),
         return np.array(coord)
         
     def _slice(self, coord, delta):
         bbox = self._bbox(coord, delta)
-        a = (self.img[bbox] / 256).astype("float32")
+        a = self.img[bbox]
         b = self.lbl[bbox]
         return a, b
     
@@ -115,12 +112,13 @@ class DataSet(object):
     def _prepare_aug(self):
         if self.mode=="train":
             fov_ = self.w.prepare(self.fov)
+            fov_ = self.ma.prepare(fov_)
             self.f.prepare(None)
             self.g.prepare(None)
             return np.array(fov_)
         else:
             return np.array(self.fov)
-        
+
 class MultiDataset():
     def __init__(self, datasets, weight=None, nsamp=None, mode="train"):
         self.datasets = datasets
