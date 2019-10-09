@@ -260,13 +260,12 @@ class Greyscale():
     def prepare(self, x):
         """
         """
-        self.skip = np.random.rand() < self.skip_ratio
         return x
 
     def __call__(self, img, lbl=None):
         """
         """
-        if not self.skip:
+        if not np.random.rand() < self.skip_ratio:
             if self.mode == 'mix':
                 mode = '3D' if np.random.rand() > 0.5 else '2D'
             else:
