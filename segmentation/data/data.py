@@ -87,8 +87,8 @@ def get_sparse_snemid_dataset(root, fov, sparse_rate, num_workers):
     return train_dataset, val_dataset
 
 
-def get_igaku_dendrite_dataset(root,fov,num_workers,dst,sparse=False):
-    img  = tifffile.imread(root+"train-allImages.tif")
+def get_igaku_dendrite_dataset(root, fov, num_workers, dst, sparse=False, dtype="float32"):
+    img  = tifffile.imread(root+"train-allImages.tif").astype(dtype)
     lbl  = tifffile.imread(root+"train-allLabels.tif")
     val_img, train_img = img[:,:,:150], img[:,:,150:]
     val_lbl, train_lbl = lbl[:,:,:150], lbl[:,:,150:]
