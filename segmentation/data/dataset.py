@@ -26,7 +26,7 @@ def make_gaussian(z, y, x, sigma=0.5):
     return np.exp(-(d**2 / (2.0 * sigma**2)))
 
 class DataSet(object):
-    def __init__(self, fov, img, lbl, mode="train", 
+    def __init__(self, fov, img, lbl, coords=None, sparse=True, mode="train", 
                  w=True, g=True, f=True, ma=False, mis=False, blr=False, 
                  dst=default_dst, nsamp=None):
         self.img = img
@@ -51,7 +51,7 @@ class DataSet(object):
         self.blr = BlurAugment()
         self.mis = MissingAugment()
         self.ma = MisalignAugment()
-        self.a = Affinity(dst=self.dst, recompute=False)
+        self.a = Affinity(dst=self.dst, recompute=False, sparse=sparse)
         
         
     def __getitem__(self, _):
@@ -111,10 +111,8 @@ class DataSet(object):
     
     def _prepare_aug(self):
         if self.mode=="train":
-            fov_ = self.w.prepare(self.fov)
-            fov_ = self.ma.prepare(fov_)
-            self.f.prepare(None)
-            self.g.prepare(None)
+            fov_ = self.w.prepare(self.fov) if self._w else fov_
+            fov_ = self.ma.prepare(fov_) if self._ma else fov_
             return np.array(fov_)
         else:
             return np.array(self.fov)
